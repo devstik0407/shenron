@@ -1,0 +1,7 @@
+.idea
+*.exe
+*.out
+
+application.yaml
+/resources
+/out
