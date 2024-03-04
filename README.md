@@ -1,2 +1,2 @@
 # shenron
-A distributed cache
+Harness the power of caching with SHENRON
