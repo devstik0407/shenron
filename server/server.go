@@ -2,15 +2,15 @@ package server
 
 import (
 	"fmt"
-	"github.com/devstik0407/shenron/store"
+	"github.com/devstik0407/shenron/service"
 	"github.com/gorilla/mux"
 	"net/http"
 )
 
 func Start(cfg *Config, deps Dependencies) {
 	r := mux.NewRouter()
-	r.HandleFunc("/store/{key}", GetItemHandler(deps.Store)).Methods(http.MethodGet)
-	r.HandleFunc("/store", SetItemHandler(deps.Store)).Methods(http.MethodPost)
+	r.HandleFunc("/store/{key}", GetItemHandler(deps.Service)).Methods(http.MethodGet)
+	r.HandleFunc("/store", SetItemHandler(deps.Service)).Methods(http.MethodPost)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Address, cfg.Port)
 
@@ -21,7 +21,7 @@ func Start(cfg *Config, deps Dependencies) {
 }
 
 type Dependencies struct {
-	Store store.Store
+	Service service.Service
 }
 
 type Config struct {

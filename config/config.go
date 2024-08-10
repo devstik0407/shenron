@@ -2,7 +2,8 @@ package config
 
 import (
 	"github.com/devstik0407/shenron/cleaner"
-	"github.com/devstik0407/shenron/store"
+	"github.com/devstik0407/shenron/persistence"
+	"github.com/devstik0407/shenron/service"
 	"github.com/spf13/viper"
 )
 
@@ -21,21 +22,29 @@ func init() {
 }
 
 type Config struct {
-	Port    int
-	Address string
-	Cleaner *cleaner.Config
-	Store   *store.Config
+	Port          int
+	Address       string
+	Service       *service.Config
+	CleanupWorker *cleaner.Config
+	Persistence   *persistence.Config
 }
 
 func Load() {
 	App = &Config{
 		Port:    GetInt("PORT", 8080),
 		Address: GetString("ADDRESS", "localhost"),
-		Cleaner: &cleaner.Config{
-			CleanupInterval: GetInt("CLEANUP_INTERVAL_IN_SECONDS", 2),
+		Service: &service.Config{
+			ReadTimeoutMs:          GetInt("READ_TIMEOUT_MS", 10),
+			WriteTimeoutMs:         GetInt("WRITE_TIMEOUT_MS", 20),
+			DefaultExpiryInSeconds: GetInt("DEFAULT_EXPIRY_SECONDS", 3600),
 		},
-		Store: &store.Config{
-			DefaultExpiry: GetInt("DEFAULT_EXPIRY_IN_SECONDS", 1000),
+		CleanupWorker: &cleaner.Config{
+			CleanupInterval: GetInt("CLEANUP_INTERVAL_SECONDS", 5),
+			WorkerCount:     GetInt("CLEANUP_WORKER_COUNT", 2),
+		},
+		Persistence: &persistence.Config{
+			AOFWorkerCount:     GetInt("AOF_PERSISTENCE_WORKER_COUNT", 2),
+			AOFFlushIntervalMs: GetInt("AOF_FLUSH_INTERVAL_MS", 1000),
 		},
 	}
 }
