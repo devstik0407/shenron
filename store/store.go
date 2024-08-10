@@ -1,74 +1,78 @@
 package store
 
 import (
+	"context"
 	"github.com/devstik0407/shenron/pkg"
+	"github.com/pkg/errors"
 	"sync"
 	"time"
 )
 
-type Config struct {
-	DefaultExpiry int
-}
+var storeInstance *store
 
 type Store interface {
-	Get(key string) (interface{}, error)
-	Set(key string, value interface{}, duration time.Duration) error
-	GetOldestExpiredKey() (string, error)
+	Get(ctx context.Context, key string) (interface{}, error)
+	Set(ctx context.Context, key string, value interface{}, duration time.Duration) (*Item, error)
 	Delete(key string)
+	DeleteOldestExpiredKey() string
 }
 
 type store struct {
-	mu      sync.Mutex
+	mu      *sync.RWMutex
 	items   map[string]Item
 	itemsPQ pkg.PriorityQueue
-	config  *Config
 }
 
-type Item struct {
-	Key    string
-	Value  interface{}
-	Expiry time.Time
+func GetInstance() Store {
+	if storeInstance == nil {
+		storeInstance = &store{
+			mu:      &sync.RWMutex{},
+			items:   map[string]Item{},
+			itemsPQ: pkg.PriorityQueue{},
+		}
+	}
+	return storeInstance
 }
 
-func New(cfg *Config) *store {
-	return &store{
-		mu:      sync.Mutex{},
-		items:   map[string]Item{},
-		itemsPQ: pkg.PriorityQueue{},
-		config:  cfg,
+func (s *store) Get(ctx context.Context, key string) (interface{}, error) {
+	defer s.releaseReadLock()
+
+	select {
+	case <-ctx.Done():
+		return nil, errors.Wrap(ctx.Err(), "[store.Get] read timeout")
+	case <-s.acquireReadLock():
+		item, ok := s.items[key]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		if item.ExpiresAt.Before(time.Now()) {
+			return nil, ErrExpired
+		}
+		return item.Value, nil
 	}
+
 }
 
-func (s *store) Get(key string) (interface{}, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *store) Set(ctx context.Context, key string, value interface{}, duration time.Duration) (*Item, error) {
+	defer s.releaseWriteLock()
 
-	item, ok := s.items[key]
-	if !ok {
-		return nil, ErrNotFound
+	select {
+	case <-ctx.Done():
+		return nil, errors.Wrap(ctx.Err(), "[store.Set] write timeout")
+	case <-s.acquireWriteLock():
+		expiryTime := time.Now().Add(duration)
+		s.items[key] = Item{
+			Key:       key,
+			Value:     value,
+			ExpiresAt: expiryTime,
+		}
+		s.itemsPQ.PushItem(key, int(expiryTime.Unix()))
+		return &Item{
+			Key:       key,
+			Value:     value,
+			ExpiresAt: expiryTime,
+		}, nil
 	}
-
-	if item.Expiry.Before(time.Now()) {
-		return nil, ErrExpired
-	}
-
-	return item.Value, nil
-}
-
-func (s *store) Set(key string, value interface{}, duration time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	expiryTime := time.Now().Add(duration)
-
-	s.items[key] = Item{
-		Key:    key,
-		Value:  value,
-		Expiry: expiryTime,
-	}
-	s.itemsPQ.PushItem(key, int(expiryTime.Unix()))
-
-	return nil
 }
 
 func (s *store) Delete(key string) {
@@ -79,14 +83,43 @@ func (s *store) Delete(key string) {
 	s.itemsPQ.PopItem()
 }
 
-func (s *store) GetOldestExpiredKey() (string, error) {
+func (s *store) DeleteOldestExpiredKey() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	top := s.itemsPQ.TopItem()
-	if top == nil || top.Priority() > int(time.Now().Unix()) {
-		return "", ErrNoKeys
+	if top == nil {
+		return ""
 	}
 
-	return top.Value(), nil
+	key := top.Value()
+	if s.items[key].ExpiresAt.Before(time.Now()) {
+		delete(s.items, key)
+		s.itemsPQ.PopItem()
+		return key
+	}
+
+	return ""
+}
+
+func (s *store) acquireReadLock() chan int {
+	s.mu.RLock()
+	ch := make(chan int, 1)
+	ch <- 1
+	return ch
+}
+
+func (s *store) acquireWriteLock() chan int {
+	s.mu.Lock()
+	ch := make(chan int, 1)
+	ch <- 1
+	return ch
+}
+
+func (s *store) releaseReadLock() {
+	s.mu.RUnlock()
+}
+
+func (s *store) releaseWriteLock() {
+	s.mu.Unlock()
 }
